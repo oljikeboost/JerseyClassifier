@@ -1,0 +1,8 @@
+images/*
+*.png
+.idea
+.ipynb_checkpoints
+*.pyc
+data/*
+logs/*
+work_dirs/*
