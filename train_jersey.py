@@ -81,7 +81,6 @@ def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
         exit()
 
 
-
     size = 64
     crop_size = 54
     transform = transforms.Compose([
@@ -93,7 +92,9 @@ def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
     train_loader = torch.utils.data.DataLoader(JerseyDataset(path_to_train_file, transform, size),
                                                batch_size=batch_size, shuffle=True,
                                                num_workers=4, pin_memory=True)
-    # evaluator = JerseyEvaluator(path_to_val_file, size)
+
+    # The following evaluator test the accuracy of the whole pipeline
+    # including the detection model
     evaluator = JerseyDetEvaluator()
 
     optimizer = optim.SGD(model.parameters(), lr=initial_learning_rate, momentum=0.9, weight_decay=0.0005)
