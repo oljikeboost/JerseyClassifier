@@ -8,6 +8,7 @@ parser.add_argument('-d', '--data_dir', default='./data', help='directory to rea
 parser.add_argument('checkpoint', type=str, help='path to evaluate checkpoint, e.g. ./logs/model-100.pth')
 
 
+
 def _eval(path_to_checkpoint_file, path_to_eval_lmdb_dir):
     model = Model()
     model.restore(path_to_checkpoint_file)
