@@ -1,0 +1,11 @@
+model = 'basic'
+train_file = 'data/jersey_crops_trash_train.txt'
+val_file = 'data/jersey_crops_trash_val.txt'
+exp = 'basic_newdata_trash_32'
+batch_size = 32
+learning_rate = 0.01
+decay_steps = 10000
+decay_rate = 0.9
+img_size = 40
+crop_size = 32
+inter_size = 5

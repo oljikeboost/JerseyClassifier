@@ -54,12 +54,15 @@ class JerseyDataset(data.Dataset):
         img_path, label = self.data[index].strip().split(',')
         image = cv2.imread(img_path)
 
-        image = cv2.resize(image, (self.size,self.size))
+        image = cv2.resize(image, (self.size, self.size))
         image = Image.fromarray(image)
         image = self._transform(image)
 
+        digits = [10, 10]  # digit 10 represents no digit
+        if label == 'None':
+            return image, 0, digits
+
         length = len(label)
-        digits = [10, 10] # digit 10 represents no digit
         for idx, label_of_digit in enumerate(label):
             digits[idx] = int(label[idx])
 

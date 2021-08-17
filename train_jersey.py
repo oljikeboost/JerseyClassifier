@@ -2,6 +2,8 @@ import argparse
 import os
 import time
 from datetime import datetime
+from mmcv import Config
+from argparse import Namespace
 
 import numpy as np
 import torch
@@ -14,9 +16,10 @@ from torchvision import transforms
 from RandAugment import RandAugment
 from dataset import Dataset, JerseyDataset
 from evaluator import JerseyEvaluator, JerseyDetEvaluator
-from model import JerseyModel, MobileJerseyModel, EfficientJerseyModel, ResNetJersey
+from model import JerseyModel, MobileJerseyModel, EfficientJerseyModel, ResNetJersey, VitModel
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--config', default=None, help='path to config file')
 parser.add_argument('-tf', '--train_file', help='..')
 parser.add_argument('-vf', '--val_file', default=None, help='..')
 parser.add_argument('-m', '--model', default='basic', help='..')
@@ -28,6 +31,8 @@ parser.add_argument('-lr', '--learning_rate', default=1e-2, type=float, help='De
 parser.add_argument('-p', '--patience', default=100, type=int, help='Default 100, set -1 to train infinitely')
 parser.add_argument('-ds', '--decay_steps', default=10000, type=int, help='Default 10000')
 parser.add_argument('-dr', '--decay_rate', default=0.9, type=float, help='Default 0.9')
+parser.add_argument('-show_loss', '--num_steps_to_show_loss', default=100, type=float, help='...')
+parser.add_argument('-check_step', '--num_steps_to_check', default=1000, type=float, help='...')
 
 
 def _loss(length_logits, digit1_logits, digit2_logits, length_labels, digits_labels):
@@ -39,13 +44,13 @@ def _loss(length_logits, digit1_logits, digit2_logits, length_labels, digits_lab
 
 
 def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
-           path_to_restore_checkpoint_file, training_options):
+           path_to_restore_checkpoint_file, training_options, args):
     model_name = training_options['model']
     batch_size = training_options['batch_size']
     initial_learning_rate = training_options['learning_rate']
     initial_patience = training_options['patience']
-    num_steps_to_show_loss = 100
-    num_steps_to_check = 1000
+    num_steps_to_show_loss = args.num_steps_to_show_loss
+    num_steps_to_check = args.num_steps_to_check
 
     step = 0
     patience = initial_patience
@@ -54,7 +59,7 @@ def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
 
     if 'basic' in model_name:
         print("Loading Basic model")
-        model = JerseyModel(inter_size=7)
+        model = JerseyModel(inter_size=args.inter_size)
         model.cuda()
     elif 'mobile' in model_name:
         print("Loading MobileV2 model")
@@ -76,13 +81,26 @@ def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
         from torchvision.models.resnet import BasicBlock
         model = ResNetJersey(BasicBlock, [2, 2, 2, 2])
         model.cuda()
+    elif 'vit' in model_name:
+        print("Loading Vit model...")
+        from torchvision.models.resnet import BasicBlock
+        model = VitModel(image_size = 64,
+                        patch_size = 16,
+                        dim = 1024,
+                        depth = 6,
+                        heads = 16,
+                        mlp_dim = 2048,
+                        dropout = 0.1,
+                        emb_dropout = 0.1)
+        model.cuda()
+
     else:
         print("Wrong model name!")
         exit()
 
 
-    size = 64
-    crop_size = 54
+    size = args.img_size
+    crop_size = args.crop_size
     transform = transforms.Compose([
         RandAugment(2, 9),
         transforms.RandomCrop([crop_size, crop_size]),
@@ -95,7 +113,12 @@ def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
 
     # The following evaluator test the accuracy of the whole pipeline
     # including the detection model
-    evaluator = JerseyDetEvaluator()
+    # evaluator = JerseyDetEvaluator(
+    #     config_file='/home/ubuntu/oljike/BallTracking/mmdetection/configs/yolo_jersey/yolov3_d53_320_273e_jersey_smallres.py',
+    #     checkpoint_file='/home/ubuntu/oljike/BallTracking/mmdetection/work_dirs/jersey_region_yolov3-320_fullData_smallRes/epoch_90.pth',
+    #     crop_size=crop_size
+    # )
+    evaluator = JerseyEvaluator(size = crop_size)
 
     optimizer = optim.SGD(model.parameters(), lr=initial_learning_rate, momentum=0.9, weight_decay=0.0005)
     scheduler = StepLR(optimizer, step_size=training_options['decay_steps'], gamma=training_options['decay_rate'])
@@ -139,28 +162,41 @@ def _train(path_to_train_file, path_to_val_file, path_to_log_dir,
             losses = np.append(losses, loss.item())
             np.save(path_to_losses_npy_file, losses)
 
-            print('=> Evaluating on validation dataset...')
-            accuracy = evaluator.evaluate(model)
-            print('==> accuracy = %f, best accuracy %f' % (accuracy, best_accuracy))
+        print('=> Evaluating on validation dataset...')
+        accuracy = evaluator.evaluate(model)
+        print('==> accuracy = %f, best accuracy %f' % (accuracy, best_accuracy))
 
-            if accuracy > best_accuracy:
-                path_to_checkpoint_file = model.store(path_to_log_dir, step=step)
-                print('=> Model saved to file: %s' % path_to_checkpoint_file)
-                patience = initial_patience
-                best_accuracy = accuracy
-            else:
-                patience -= 1
+        if accuracy > best_accuracy:
+            path_to_checkpoint_file = model.store(path_to_log_dir, step=step)
+            print('=> Model saved to file: %s' % path_to_checkpoint_file)
+            patience = initial_patience
+            best_accuracy = accuracy
+        else:
+            patience -= 1
 
-            print('=> patience = %d' % patience)
-            if patience == 0:
-                return
+        print('=> patience = %d' % patience)
+        if patience == 0:
+            return
 
 
 def main(args):
+
+    if args.config is not None:
+        conf = Config.fromfile(args.config)
+        opt_dict = vars(args)
+
+        for k, v in conf.items():
+            # if k in opt_dict:
+            #     opt_dict[k] = v
+            opt_dict[k] = v
+        args = Namespace(**opt_dict)
+
     path_to_train_file = args.train_file
     path_to_val_file = args.val_file
     path_to_log_dir = args.exp
     path_to_restore_checkpoint_file = args.restore_checkpoint
+
+
     training_options = {
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
@@ -176,7 +212,7 @@ def main(args):
 
     print('Start training')
     _train(path_to_train_file, path_to_val_file, path_to_log_dir,
-           path_to_restore_checkpoint_file, training_options)
+           path_to_restore_checkpoint_file, training_options, args)
     print('Done')
 
 

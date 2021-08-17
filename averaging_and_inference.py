@@ -12,8 +12,8 @@ import os
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('-a', '--best_acc', default=89.7, help='..')
-parser.add_argument('-m', '--models_path', default='./work_dirs/r18_randaug_fulldata/',  help='..')
+parser.add_argument('-a', '--best_acc', default=92.4, help='..')
+parser.add_argument('-m', '--models_path', default='./work_dirs/basic_newdata/',  help='..')
 
 
 def average_models(models_path):

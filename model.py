@@ -225,6 +225,8 @@ class JerseyModel(torch.nn.Module):
         x = self._hidden8(x)
         # print(x.size())
         x = x.view(x.size(0), 192 * self.inter_size * self.inter_size)
+        # print(x.shape)
+        # x = x.view(x.size(0), -1)
         x = self._hidden9(x)
         x = self._hidden10(x)
 
@@ -248,8 +250,8 @@ class JerseyModel(torch.nn.Module):
 
     def restore(self, path_to_checkpoint_file):
         self.load_state_dict(torch.load(path_to_checkpoint_file))
-        step = int(path_to_checkpoint_file.split('/')[-1][6:-4])
-        return step
+        # step = int(path_to_checkpoint_file.split('/')[-1][6:-4])
+        # return step
 
 from torchvision.models.mobilenet import MobileNetV2
 class MobileJerseyModel(MobileNetV2):
@@ -378,6 +380,83 @@ class ResNetJersey(ResNet):
         x = torch.flatten(x, 1)
 
         length_logits = self.fc(x)
+        digit1_logits = self._digit1(x)
+        digit2_logits = self._digit2(x)
+
+        return length_logits, digit1_logits, digit2_logits
+
+    def store(self, path_to_dir, step, maximum=5):
+        path_to_models = glob.glob(os.path.join(path_to_dir, Model.CHECKPOINT_FILENAME_PATTERN.format('*')))
+        if len(path_to_models) == maximum:
+            min_step = min([int(path_to_model.split('/')[-1][6:-4]) for path_to_model in path_to_models])
+            path_to_min_step_model = os.path.join(path_to_dir, Model.CHECKPOINT_FILENAME_PATTERN.format(min_step))
+            os.remove(path_to_min_step_model)
+
+        path_to_checkpoint_file = os.path.join(path_to_dir, Model.CHECKPOINT_FILENAME_PATTERN.format(step))
+        torch.save(self.state_dict(), path_to_checkpoint_file)
+        return path_to_checkpoint_file
+
+    def restore(self, path_to_checkpoint_file):
+        self.load_state_dict(torch.load(path_to_checkpoint_file))
+        step = int(path_to_checkpoint_file.split('/')[-1][6:-4])
+        return step
+
+
+from vit_pytorch.vit import Transformer
+from einops.layers.torch import Rearrange
+from einops import rearrange, repeat
+class VitModel(nn.Module):
+    CHECKPOINT_FILENAME_PATTERN = 'model-{}.pth'
+    def __init__(self, *, image_size, patch_size,
+                 dim, depth, heads, mlp_dim, num_classes=1000, pool='cls', channels=3,
+                 dim_head=64, dropout=0., emb_dropout=0.):
+        super().__init__()
+
+        assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = channels * patch_size ** 2
+        assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
+
+        self.to_patch_embedding = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_size, p2=patch_size),
+            nn.Linear(patch_dim, dim),
+        )
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        self.dropout = nn.Dropout(emb_dropout)
+
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+
+        self.pool = pool
+        self.to_latent = nn.Identity()
+
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(1024, elementwise_affine=True),
+            nn.Linear(1024, 4))
+        self._digit1 = nn.Sequential(
+            nn.LayerNorm(1024, elementwise_affine=True),
+            nn.Linear(1024, 11))
+        self._digit2 = nn.Sequential(
+            nn.LayerNorm(1024, elementwise_affine=True),
+            nn.Linear(1024, 11))
+
+    def forward(self, img):
+        x = self.to_patch_embedding(img)
+        b, n, _ = x.shape
+
+        cls_tokens = repeat(self.cls_token, '() n d -> b n d', b=b)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n + 1)]
+        x = self.dropout(x)
+
+        x = self.transformer(x)
+
+        x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
+
+        x = self.to_latent(x)
+
+        length_logits = self.mlp_head(x)
         digit1_logits = self._digit1(x)
         digit2_logits = self._digit2(x)
 

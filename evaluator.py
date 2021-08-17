@@ -52,9 +52,9 @@ class Evaluator(object):
 
 
 class JerseyEvaluator(object):
-    def __init__(self, path_to_anno_file, size=64):
+    def __init__(self, path_to_anno_file = './data/jersey_crops_val.txt', size=64):
         transform = transforms.Compose([
-            transforms.CenterCrop([54, 54]),
+            # transforms.CenterCrop([54, 54]),
             transforms.ToTensor(),
             transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         ])
@@ -62,7 +62,11 @@ class JerseyEvaluator(object):
 
     def evaluate(self, model):
         num_correct = 0
+        length_correct = 0
         needs_include_length = False
+        sum_ = 0
+        answer_d1 = {0: [0,0], 1: [0,0], 2: [0,0], 3: [0,0], 4: [0,0], 5: [0,0], 6: [0,0], 7: [0,0], 8: [0,0], 9: [0,0], 10: [0,0]}
+        answer_d2 = {0: [0,0], 1: [0,0], 2: [0,0], 3: [0,0], 4: [0,0], 5: [0,0], 6: [0,0], 7: [0,0], 8: [0,0], 9: [0,0], 10: [0,0]}
 
         with torch.no_grad():
             for batch_idx, (images, length_labels, digits_labels) in enumerate(self._loader):
@@ -73,45 +77,59 @@ class JerseyEvaluator(object):
                 digit1_prediction = digit1_logits.max(1)[1]
                 digit2_prediction = digit2_logits.max(1)[1]
 
-                # if length_prediction.item() == 1:
-                #     res = [digit1_prediction.item(), None]
-                # elif length_prediction.item() == 2:
-                #     res = [digit1_prediction.item(), digit2_prediction.item()]
-                #
-                # res = int(''.join([str(x) for x in res if x is not None]))
-                # labels = int(''.join([str(x) for x in digits_labels if x!=10]))
-                # if res == labels:
-                #     num_correct += 1
+                for dl1, dl1_pred in zip(digits_labels[0], digit1_prediction):
+
+                    if dl1 == dl1_pred:
+                        answer_d1[dl1.cpu().item()][0] += 1
+                    answer_d1[dl1.cpu().item()][1] += 1
+
+                for dl2, dl2_pred in zip(digits_labels[1], digit2_prediction):
+                    if dl2 == dl2_pred:
+                        answer_d2[dl2.cpu().item()][0] += 1
+                    answer_d2[dl2.cpu().item()][1] += 1
+
                 if needs_include_length:
                     num_correct += (length_prediction.eq(length_labels) &
                                     digit1_prediction.eq(digits_labels[0]) &
                                     digit2_prediction.eq(digits_labels[1])).cpu().sum()
                 else:
+                    length_correct += (length_prediction.eq(length_labels)).cpu().sum()
                     num_correct += (digit1_prediction.eq(digits_labels[0]) &
                                     digit2_prediction.eq(digits_labels[1])).cpu().sum()
 
         print('Number of samples is ', len(self._loader.dataset))
         accuracy = num_correct.item() / len(self._loader.dataset)
-        # accuracy = num_correct / len(self._loader.dataset)
+        length_accuracy = length_correct.item() / len(self._loader.dataset)
+        print("Length accuracy ", length_accuracy)
+
+        print("Accuracy by first number: ", answer_d1)
+        print("Accuracy by second number: ", answer_d2)
+
+        answer_d1 = {k: v[0]/v[1] for k, v in answer_d1.items() if v[1]!=0}
+        answer_d2 = {k: v[0]/v[1] for k, v in answer_d2.items() if v[1]!=0}
+        print("Accuracy by first number: ", answer_d1)
+        print("Accuracy by second number: ", answer_d2)
+
         return accuracy
+
 
 from mmdet.apis import init_detector, inference_detector, inference_batch_detector
 class JerseyDetEvaluator(object):
-    def __init__(self,):
+    def __init__(self,
+                 config_file='/home/ubuntu/oljike/BallTracking/mmdetection/configs/yolo_jersey/yolov3_d53_320_273e_jersey.py',
+                 checkpoint_file='/home/ubuntu/oljike/BallTracking/mmdetection/work_dirs/jersey_region_yolov3-320_fullData/epoch_150.pth',
+                 crop_size=54
+                 ):
         ### Config and model weights path
-        det_paths = '/home/ubuntu/oljike/ocr_jersey/two_stage_pipeline/data/detector_val_path.txt'
+        det_paths = '/home/ubuntu/oljike/ocr_jersey/JerseyClassifier/data/detector_val_path.txt'
         with open(det_paths) as f:
             self.det_paths = f.readlines()
-
-        config_file = '/home/ubuntu/oljike/BallTracking/mmdetection/configs/yolo_jersey/yolov3_d53_320_273e_jersey.py'
-        # checkpoint_file = '/home/ubuntu/oljike/BallTracking/mmdetection/work_dirs/jersey_region_yolov3-320/epoch_80.pth'
-        checkpoint_file = '/home/ubuntu/oljike/BallTracking/mmdetection/work_dirs/jersey_region_yolov3-320_fullData/epoch_150.pth'
 
         # build the model from a config file and a checkpoint file
         self.det_model = init_detector(config_file, checkpoint_file, device='cuda:0')
 
         self.transform = transforms.Compose([
-            transforms.CenterCrop([54, 54]),
+            transforms.CenterCrop([crop_size, crop_size]),
             transforms.ToTensor(),
             transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         ])
